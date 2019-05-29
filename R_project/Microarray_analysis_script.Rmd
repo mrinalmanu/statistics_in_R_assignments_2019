@@ -1,0 +1,536 @@
+---
+title: "Microarray_and_RNAseq_in_R"
+author: "Mrinal Vashisth"
+date: "5/29/2019"
+output: html_document
+---
+
+```{r}
+################################### MICROARRAY ANALYSIS IN R
+################################################################################
+## Author: Mrinal Vashisth
+## Script submitted as an R project for R course, Semester 2, ITMO
+# The cells of this markdown are broken down into checkpoints of the pipeline for
+# RNAseq and Microarray analysis
+
+###### Libraries ################################################################
+
+library(dplyr)
+library(GEOquery)
+library(limma)
+# library for Human annotation
+library(org.Hs.eg.db)
+# library for Mouse annotation
+library(org.Mm.eg.db) 
+library(data.table)
+library(fgsea)
+library(tibble)
+library(data.table)
+library(msigdbr)
+library(ggplot2)
+library(DT)
+library(pheatmap)
+# install.packages('devtools')
+# library(devtools)
+# devtools::install_github("sinhrks/ggfortify")
+library(ggfortify)
+# source('/home/manu/Desktop/functions.r')
+
+################################
+
+
+```
+
+```{r}
+
+# Here GSE ID needs to be modified for subsequent analysis
+#################################################################################
+
+res<- getGEO("GSE77478", AnnotGPL = TRUE)[[1]]
+
+######## Loading the data #######################################################
+
+# GEOquery is working, this is a list of files, we can see all the information
+# to access individual list we need to use this format // res$data@data //
+# for example, res@experimentData@title will give us details about the experiment
+res@experimentData@title
+
+# is this a mouse/ human dataset
+res@experimentData@abstract
+```
+
+```{r}
+# every GEO data has these internal identifiers: pData is phenotypeData, fData is featureData
+str(experimentData(res))
+
+```
+
+```{r}
+
+# we know in advance from the paper abstract what these conditions are but still let's look at the structure of the data to identify our conditions
+str(pData(res))
+```
+
+```{r}
+
+condition <- res@phenoData@data[["source_name_ch1"]]
+condition <- gsub("\\ ", "_", condition)
+condition <- gsub("\\-", "_", condition)
+res$conditon <-condition
+
+# here with gsub, we are just cleaning the data. each entry begins with the symbols \\- and \\ (blank space), _
+# we have to CLEAN these symbols in order to make a design matrix
+```
+
+```{r}
+
+######################### Collapsing duplicates
+
+###### 
+# There are repetitions for gene symbols which we need to take care
+# here we use // collapseBy // function to remove the redundancy from the data
+# from https://github.com/assaron/r-utils/blob/master/R/exprs.R
+
+collapseBy <- function(es, factor, FUN=median) {
+  ranks <- apply(exprs(es), 1, FUN)
+  t <- data.frame(f=factor, i=seq_along(ranks), r=ranks)
+  t <- t[order(t$r, decreasing=T), ]
+  keep <- t[!duplicated(t$f) & !is.na(t$f),]$i
+  res <- es[keep, ]
+  fData(res)$origin <- rownames(res)
+  rownames(res) <- factor[keep]
+  res
+}
+# Now we collapse the dataset with genesymbols, similar to what we did in phantasus
+
+res <- collapseBy(res, fData(res)$`Gene symbol`, FUN=median)
+res <- res[!grepl("///", rownames(res)), ]
+res <- res[rownames(res) != "", ]
+
+```
+
+```{r}
+######################### Gene symbol annotation
+# let's annotate the symbols with the mouse database entries
+
+fData(res) <- data.frame(row.names = rownames(res))
+fData(res)$entrez <- row.names(fData(res))
+fData(res)$symbol <- mapIds(org.Mm.eg.db, keys=fData(res)$entrez, keytype = "SYMBOL", 
+                          column="ENTREZID" )
+```
+
+```{r}
+######################### Normalisation of the data
+# Please make note that sometimes the data is already normalised... in this case we comment or uncomment one line and proceed
+res.qnorm <- res
+summary(exprs(res.qnorm))
+
+
+# exprs(res.qnorm) <- normalizeBetweenArrays(log2(exprs(res.qnorm)+1), method="quantile")
+#                               ^                                       
+#                               |
+############ Uncomment this line if data is not already normalised
+# options for normalisation 'quantile' but log transform can also be used
+# we can use quantile normalisation multiple times but log transform can be used
+# only once
+
+summary(exprs(res.qnorm))
+# we can see that the data is normalised if it was not normalised in the first place
+
+```
+
+```{r}
+######################### Selecting to X*1000 entries from the data
+res.qnorm.top12K <- res.qnorm
+
+# In differentially expressed data we are only aiming for TOP differentially expressed
+# data only. Usually 12000 is a good number but any suitable number can be selected.
+
+# let's get top 12000 entries
+res.qnorm.top12K <- res.qnorm.top12K[head(order(apply(exprs(res.qnorm.top12K), 1, mean), 
+                                                decreasing = TRUE), 12000), ]
+```
+
+
+```{r}
+
+######## Quality control #######################################################\
+# We use information from combination of PCA plot, violing plot, and cluster dendrogram
+# to remove outliers
+
+####################################### PCA
+pcaPlot <- function(es, c1, c2) {
+  stopifnot(require(ggplot2))
+  pca <- prcomp(t(exprs(es)))
+  
+  explained <- (pca$sdev)^2 / sum(pca$sdev^2)
+  
+  xs <- sprintf("PC%s", seq_along(explained))
+  xlabs <- sprintf("%s (%.1f%%)", xs, explained * 100)
+  
+  d <- cbind(as.data.frame(pca$x), pData(es))
+  if (!"sample" %in% colnames(d)) {
+    d <- cbind(d, sample=colnames(es))
+  }
+  
+  pp <- ggplot(data=d)
+  
+  pp + aes_string(x=xs[c1], y=xs[c2]) +
+    geom_point(size=3) +
+    xlab(xlabs[c1]) + ylab(xlabs[c2])
+}
+  
+# Now let's look at the dataset
+#pdf('pca_dataset2.pdf')
+
+#also we can make PCA plot from our dataset
+pcaPlot(res.qnorm.top12K, 1, 2) + aes(color=condition)
+
+# dev.off()
+```
+
+```{r}
+############################### heatmap
+
+#scale rows
+xt <-t(as.matrix(res.qnorm.top12K)) # this is a matrix of normalised 12k genes
+# let's get a heatmap of 1000 genes suggested in the study
+xts <-scale(xt)
+xtst <-t(xts)
+xtst <- na.omit(xtst)
+colnames(xtst) <- res$condition
+#only grab top 1048 by p-value
+h<-head(xtst, n = 1048L)
+#set layout options - adjust if labels get cut off
+#pdf("heatmap.pdf",width=10, height=100)
+#draw heatmap allowing larger margins and adjusting row label font size
+#pdf('heatmap.pdf', width = 20, height = 200)
+pheatmap(h)
+
+#dev.off()
+
+```
+
+```{r}
+############################### violin
+
+  # let's make a violin of the data
+  
+  #pdf('violin_dataset.pdf', height = 5, width = 15)
+  gt <- t(xt) # taking xt from the heatmap and transposing it
+  colnames(gt)<- res$condition # now giving it labels from condition
+  ggplot(stack(data.frame(gt)), aes(x = ind, y = values)) +
+    geom_violin() + theme_bw()
+
+```
+
+```{r}
+################################# Removing Outliers
+# Please be careful with this step, we don't want to remove too many samples
+# Our idea is to conserve information and remove data only when it is really bad!!
+
+
+
+```
+
+```{r}
+############################ Differential Expression ############################
+
+# Now we make a design matrix that will be used to make a model for the given data
+res.design <- model.matrix(~0+condition, data=pData(res.qnorm.top12K))
+res.design
+
+```
+
+```{r}
+# based on this matrix we fit our data
+fit <- lmFit(res.qnorm.top12K, res.design)
+# we will also make a bayisian model for the data called fit2
+# this is the tricky part, because we need to choose contrast names which specify the sample groups to compare! we need to specify condition of interest and level to compare.
+# fit2 <- contrasts.fit(fit,makeContrasts(conditionmyoblasts_control-conditionmyoblasts_Pax7, conditionmyoblasts_control-conditionmyoblasts_Pax7_ERD, conditionmyoblasts_control-conditionmyoblasts_PAX7_FOXO1A, levels=res.design))
+# # (res_data2.design)
+# fit2 <- eBayes(fit2)
+# # now let's do a bonferroni-hochback correction
+# de <- topTable(fit2, adjust.method="BH", number=Inf)
+
+fit2_control_pax7 <- contrasts.fit(fit,makeContrasts(conditionmyoblasts_control-conditionmyoblasts_Pax7, levels=res.design))
+
+fit2_control_ERD <- contrasts.fit(fit,makeContrasts(conditionmyoblasts_control-conditionmyoblasts_Pax7_ERD, levels=res.design))
+  
+fit2_control_foxo1 <- contrasts.fit(fit,makeContrasts(conditionmyoblasts_control-conditionmyoblasts_PAX7_FOXO1A, levels=res.design))
+
+# (res_data2.design)
+fit2_control_pax7 <- eBayes(fit2_control_pax7)
+
+fit2_control_ERD <- eBayes(fit2_control_ERD)
+
+fit2_control_foxo1 <- eBayes(fit2_control_foxo1)
+# now let's do a bonferroni-hochback correction
+de_control_pax7 <- topTable(fit2_control_pax7, adjust.method="BH", number=Inf)
+
+de_control_ERD <- topTable(fit2_control_ERD, adjust.method="BH", number=Inf)
+
+de_control_foxo1 <- topTable(fit2_control_foxo1, adjust.method="BH", number=Inf)
+
+# Here, we have a matrix that contains the enriched genes, we take the top genes and submit to database (msigdbr) to get the enriched pathways. We first target the hallmark pathways, which are well studied and then we target all the pathways. We try to find out what special pathways are involved in our normal versus condition. This will further give us insight into the comparision.
+
+```
+
+```{r}
+de_control_pax7 <- as.data.table(de_control_pax7, keep.rownames=TRUE)
+
+de_control_ERD <- as.data.table(de_control_ERD, keep.rownames=TRUE)
+
+de_control_foxo1 <- as.data.table(de_control_foxo1, keep.rownames=TRUE)
+# in the paper they talk about Pax7
+de_control_pax7[entrez == "Pax7"] 
+de_control_ERD[entrez == "Pax7"] 
+de_control_foxo1[entrez == "Pax7"] 
+de_control_pax7[entrez == "Foxo1"] 
+de_control_ERD[entrez == "Foxo1"] 
+de_control_foxo1[entrez == "Foxo1"] 
+
+```
+
+```{r}
+####################################### Gene Set Enrichment Analysis
+# BiocManager::install('fgsea')
+
+# We use the matrix de to make a new matrix which contains annotated information about the pathways
+# Let's make a new matrix de2 which will store information about pathways
+
+de_control_pax7_2 <- data.frame(de_control_pax7$entrez, de_control_pax7$P.Value) 
+de_control_ERD_2 <- data.frame(de_control_ERD$entrez, de_control_ERD$P.Value) 
+de_control_foxo1_2 <- data.frame(de_control_foxo1$entrez, de_control_foxo1$P.Value) 
+
+
+colnames(de_control_pax7_2) <- c('ENTREZ', 'stat')
+colnames(de_control_ERD_2) <- c('ENTREZ', 'stat')
+colnames(de_control_foxo1_2) <- c('ENTREZ', 'stat')
+# let's get the rank of genes from top differentially expressed to non significant
+ranks_control_pax <- deframe(de_control_pax7_2)
+ranks_control_erd <- deframe(de_control_ERD_2)
+ranks_control_foxo1 <- deframe(de_control_foxo1_2)
+```
+
+```{r}
+########################################## Pathway analysis from MsigDb
+
+# Load the pathways into a named list
+# BiocManager::install('msigdbr')
+
+m_df <- msigdbr(species = "Mus musculus")
+# View(m_df)
+pathways <- split(m_df$human_gene_symbol, m_df$gs_name)
+
+#                               ^                                       
+#                               |
+############ This is our dataframe of all pathways
+
+```
+
+```{r}
+
+################# Example: Pathway analysis for HALLMARK PATHWAYS
+# filter the list to include only hallmark pathways
+
+pathways.hallmark <- m_df[m_df$gs_name %like% "HALLMARK_", ]
+pathways.hallmark <- split(pathways.hallmark$human_gene_symbol, pathways.hallmark$gs_name)
+# Show the first few pathways, and within those, show only the first few genes. 
+pathways.hallmark %>% 
+  head() %>% 
+  lapply(head)
+
+# running the fgsea algorithm on hallmark.pathways
+fgseaRes_control_pax <- fgsea(pathways=pathways.hallmark, stats=ranks_control_pax, nperm=1000)
+fgseaResTidy_pax <- fgseaRes_control_pax %>%
+  as_tibble() %>%
+  arrange(desc(NES))  #ggploting for halmark pathways
+
+# running the fgsea algorithm on hallmark.pathways
+fgseaRes_control_erd <- fgsea(pathways=pathways.hallmark, stats=ranks_control_erd, nperm=1000)
+fgseaResTidy_erd <- fgseaRes_control_erd %>%
+  as_tibble() %>%
+  arrange(desc(NES))  #ggploting for halmark pathways
+
+# running the fgsea algorithm on hallmark.pathways
+fgseaRes_control_fox <- fgsea(pathways=pathways.hallmark, stats=ranks_control_foxo1, nperm=1000)
+fgseaResTidy_fox <- fgseaRes_control_fox %>%
+  as_tibble() %>%
+  arrange(desc(NES))  #ggploting for halmark pathways
+
+# ggplotting for hallmark pathways
+
+# pdf("fgseaResTidy2.pdf", width = 10, height = 10)
+ggplot(fgseaResTidy_pax, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=pval<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Control-Pax7 Hallmark pathways NES from GSEA") + 
+  theme_minimal()
+
+#dev.off()
+
+# pdf("fgseaResTidy2.pdf", width = 10, height = 10)
+ggplot(fgseaResTidy_erd, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=pval<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Control-ERD Hallmark pathways NES from GSEA") + 
+  theme_minimal()
+
+#dev.off()
+
+# pdf("fgseaResTidy2.pdf", width = 10, height = 10)
+ggplot(fgseaResTidy_fox, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=pval<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Control-Foxo1 Hallmark pathways NES from GSEA") + 
+  theme_minimal()
+
+#dev.off()
+
+```
+
+```{r}
+################# Example: Pathway analysis for ALL PATHWAYS
+# filter the list to include only hallmark pathways
+
+# We have plotted all the significant patways in the hallmark pathways as 'blue' 
+# We can see that:
+    # HALLMARK_UV_RESPONSE_DN
+    # HALLMARK_TNFA_SIGNALING_VIA_NFKB
+    # HALLMARK_INFLAMMATORY_RESPONSE
+    # HALLMARK_HYPOXIA
+# pathways are activated there is nothing about muscle differentiation
+# Let's look at all pathways
+# let's make a list of all pathways fgseares.all
+fgseaRes.all_pax <- fgsea(pathways=pathways, stats=ranks_control_pax, nperm=100000)
+fgseaResTidy_pax_all <- fgseaRes.all_pax %>%
+  as_tibble() %>%
+  arrange(desc(NES))  #ggploting for all control_pax7 pathways
+
+fgseaRes.all_erd <- fgsea(pathways=pathways, stats=ranks_control_erd, nperm=100000)
+fgseaResTidy_erd_all <- fgseaRes.all_erd %>%
+  as_tibble() %>%
+  arrange(desc(NES))  #ggploting for all control_erd pathways
+
+fgseaRes.all_fox <- fgsea(pathways=pathways, stats=ranks_control_foxo1, nperm=100000)
+fgseaResTidy_fox_all <- fgseaRes.all_fox %>%
+  as_tibble() %>%
+  arrange(desc(NES))  #ggploting for all control_foxo1 pathways
+
+#pdf("fgseaResTidy2_all_pax_pathways.pdf", width = 20, height = 100)
+ggplot(fgseaResTidy_pax_all, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=pval<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="All pathways control_pax NES from GSEA") + 
+  theme_minimal()
+#dev.off()
+
+#pdf("fgseaResTidy2_all_erd_pathways.pdf", width = 20, height = 100)
+ggplot(fgseaResTidy_erd_all, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=pval<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="All pathways control_erd NES from GSEA") + 
+  theme_minimal()
+
+#dev.off()
+
+#pdf("fgseaResTidy2_all_foxo1_pathways.pdf", width = 20, height = 100)
+ggplot(fgseaResTidy_fox_all, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=pval<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="All pathways control_fox NES from GSEA") + 
+  theme_minimal()
+
+#dev.off()
+```
+
+```{r}
+# ################# Example: Pathway analysis for ALL PATHWAYS FOR A LIST OF GENE(S)
+# # in given example we only had 3 genes but if we have a list of say TOP N number of
+# # genes of intrest. We can input these genes as a list for the given script and 
+# # get every single pathway in the database that mentions the gene of intrest.
+# 
+# # Let's look at all pathways involving the following genes for the sake of example
+# 
+# # ACTG2,ADAMTS1,CAPN6,CAV1,CAV2,CCND2,COL14A1,COL15A1,EGF,EGFR,FGF1,FGF2,FGFR2,FIGF,FN1,FYN,IGF1,ITGA10,LAMA2,LAMA3,LAMB1,LAMB3,LAMC2,MME,MYLK,NCAM1,PAK3,PDGFA,PDGFD,PDGFRA,PIK3R1,PIK3R3,PIP5K1B,PPP1R12B,RELN,SPP1,THBS1,TIAM1,TNN,TNXB,VCAM1,VEGFA
+# # We are going to search the entire pathway list for any pathway that contains these genes, this can be done by subsetting and appending to a new dataframe of pathways.
+# #_------------------------------------------------
+# # let's make a list of all pathways fgseares.all
+# fgseaRes.all <- fgsea(pathways=pathways, stats=ranks, nperm=1000)
+# item <- data.frame('ACTG2','ADAMTS1','CAPN6','CAV1','CAV2','CCND2','COL14A1','COL15A1','EGF','EGFR','FGF1','FGF2','FGFR2','FIGF','FN1','FYN','IGF1','ITGA10','LAMA2','LAMA3','LAMB1','LAMB3','LAMC2','MME','MYLK','NCAM1','PAK3','PDGFA','PDGFD','PDGFRA','PIK3R1','PIK3R3','PIP5K1B','PPP1R12B','RELN','SPP1','THBS1','TIAM1','TNN','TNXB','VCAM1','VEGFA')
+# item<- t(item)
+# rownames(item) <- NULL
+# entry <- function(){
+#   
+#   x<- for (i in item){ 
+#     print(de[entrez == i])
+#     
+#   }
+#   
+#   return(x)
+#   
+# }
+# 
+# ############# Uncomment this section to get rownumbers associated with genes of intrest
+# ## searching for the genes in pathway and appending the rownumbers
+# # sink('numbers.txt')
+# # 
+# # options(max.print=2000)
+# # 
+# # for(i in item){
+# #   print(grep(i, fgseaRes.all$leadingEdge))
+# # }
+# # 
+# # sink()
+# ## we have to do a lot of cleaning of the data before importing it as csv
+# ## getting only unique values from all numbers, because one gene may overlap with other, ## we only want the unique row numbers
+# ############# recomment this section after runnint the code
+# numbers <- read.delim("~/Documents/rnaseq/data2/numbers.txt", header=FALSE, comment.char="#")
+# unique_vals <- data.frame(as.integer(unique(unlist(numbers))))
+# colnames(unique_vals) <- c('row_number')
+# # View(unique_vals)
+# pathways.final <- subset(fgseaRes.all, rownames(fgseaRes.all) %in% unique_vals$row_number)
+# #View(pathways.final)
+# #_------------------------------------------------
+# # Show the first few pathways, and within those, show only the first few genes. 
+# pathways.final %>% 
+#   head() %>% 
+#   lapply(head)
+# final <- data.frame(pathways.final)
+# # running the fgsea algorithm on final pathways
+# # Let's look at the plot
+# 
+# # ggplotting for final pathways
+# library(ggplot2)
+# ggplot(final, aes(reorder(pathway, NES), NES)) +
+#   geom_col(aes(fill=pval<0.05)) +
+#   coord_flip() +
+#   labs(x="Pathway", y="Normalized Enrichment Score",
+#        title="Selected genes from the study") + 
+#   theme_minimal()
+
+```
+```{r}
+
+##################################### Getting a pretty table for all pathways
+# install.packages('DT')
+
+# Show in a table for all pathways
+fgseaResTidy_erd_all %>% 
+  dplyr::select(-leadingEdge, -ES, -nMoreExtreme) %>% 
+  arrange(padj) %>% 
+  DT::datatable()
+
+
+##################################################################################
+# End of script
+
+```
+
