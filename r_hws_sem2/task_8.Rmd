@@ -1,0 +1,96 @@
+---
+title: "task_8"
+author: "Mrinal Vashisth"
+date: "5/10/2019"
+output: html_document
+---
+
+```{r}
+
+load('/home/manu/Downloads/CHIS2009_reduced_2.Rdata')
+
+library(ggplot2)
+
+# width <- length(unique(adult$RACEHPR2))
+ggplot(adult, aes(x=SRAGE_P)) +
+  geom_histogram(binwidth = 1) 
+
+ggplot(adult, aes(x=BMI_P)) +
+  geom_histogram(binwidth = 1) 
+
+ggplot(adult, aes(x = BMI_P, fill = factor(RBMI))) +
+  geom_histogram(binwidth = 1) 
+
+# histogram of age coloured by bmi groups
+
+ggplot(adult, aes(x=SRAGE_P, fill = RBMI)) +
+  geom_histogram(binwidth = 1) 
+
+```
+
+```{r}
+
+adult$RACEHPR2 <- factor(adult$RACEHPR2, labels = c("Latino", "Asian", "African American", "White"))
+
+adult$RBMI <- factor(adult$RBMI,labels = c("Under", "Normal", "Over", "Obese"))
+
+
+p <- ggplot(adult, aes(x=SRAGE_P, fill = RBMI)) +
+  geom_histogram(binwidth = 1) 
+k <- p +facet_grid(RBMI~.) 
+
+g <- k  + scale_fill_brewer("BMI group", palette = "Reds")
+
+g + theme_classic() + theme(strip.text.y = element_blank())
+
+
+```
+
+```{r}
+
+p <- ggplot(adult, aes(x=SRAGE_P,  fill = RBMI)) +
+  geom_histogram(binwidth = 1, position = 'fill') 
+p
+
+```
+
+```{r}
+
+p <- ggplot(adult, aes(x=SRAGE_P,  fill = RBMI)) +
+  geom_histogram(binwidth = 1, position = 'fill') 
+p +facet_grid(RBMI~.) 
+
+# Each one of them took proportion of 100 % we need to make a seperate table and store the values of proportions in order to visualise this data as a proportional facet grid.
+```
+
+```{r}
+# frequency table thus columns should be ages,
+# rows should contain proportions of each BMI group relative to each age
+library(pheatmap)
+library(tidyr)
+View(adult)
+x <- table(adult$SRAGE_P, adult$RBMI, adult$BMI_P)
+prop_df <- prop.table(x)
+
+# melting this new_df_prop (new matrix of proportions)
+
+new_melted <- data.frame(reshape2::melt(prop_df))
+
+# Build a histogram of ages colored by BMI groups
+# Add facet by BMI group
+# Color with another palette: scale_fill_brewer(“BMI group”, palette = “Reds”)
+# Use theme_classic() and theme(strip.text.y = element_blank())
+
+p <- ggplot(new_melted, aes(x=Var1, y = value, fill = Var2)) +
+  geom_histogram(stat = 'identity') 
+
+k <- p +facet_grid(Var2~.)
+
+g <- k  + scale_fill_brewer("BMI group", palette = "Reds")
+
+g + theme_classic() + theme(strip.text.y = element_blank())
+
+
+
+```
+

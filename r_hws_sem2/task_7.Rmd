@@ -1,0 +1,55 @@
+---
+title: "task_7"
+author: "Mrinal Vashisth"
+date: "4/12/2019"
+output: html_document
+---
+
+```{r}
+library(gapminder)
+library(ggplot2)
+
+ggplot(gapminder, aes(x = gdpPercap, y = lifeExp)) +
+  geom_point(aes(color = continent, size = pop), alpha = 0.8) +
+  scale_x_continuous(trans = 'log') +
+  facet_wrap(~year) +
+  scale_color_brewer(type = "Qual", palette = "Accent") +
+  theme(text = element_text(size = 7))
+
+```
+
+```{r}
+library(graphics)
+library(tidyr)
+
+g <- airquality %>%
+  gather(Ozone, Wind, Temp, Solar.R, key = "var", value = "value") 
+
+h <- na.omit(g)
+
+plot_1 <- ggplot(h, aes(x = Day, y = value, color = var)) +
+     geom_line() +
+    facet_wrap(h$var ~ h$Month) 
+
+plot_1 + theme(strip.text.x = element_blank()) 
+
+```
+
+```{r}
+
+# Distributional plots for economics data
+
+#___________plot of returns percentage___________
+ggplot(economics, aes(x = date)) + 
+  geom_line(aes(y = psavert, color = "darkred")) + 
+  geom_line(aes(y = uempmed), color = "steelblue", linetype = "twodash") + 
+  theme_minimal()
+
+# analysis for diamonds data using area plot
+
+#__________cost for quality of diamonds__________
+ggplot(data=diamonds,aes(x=price, group=cut, fill=cut)) + 
+    geom_density(adjust=1.5 , alpha=0.5)
+
+
+```

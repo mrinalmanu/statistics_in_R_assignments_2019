@@ -1,0 +1,156 @@
+---
+title: "hw_wk_1_to_5"
+author: "Mrinal Vashisth"
+date: "6/1/2019"
+output: html_document
+---
+
+```{r}
+
+### WK 2###
+
+# functions for sum, mean, and sd
+
+df_sum <- function(selection){
+                # This function takes a selection and returns sum
+    y <- sum(selection)
+  return(y)
+}
+  
+df_mean <- function(selection){
+                # Thus function will calculate mean of the selection and returns the same
+    x <- df_sum(selection)/length(selection)
+    sprintf("Mean: %s", x)
+}
+
+df_sd <- function(selection){
+              # A function for calculating standard deviation of the selection
+    x <- sqrt(sum((selection-mean(selection))^2/(length(selection)-1)))
+    sprintf("Sd: %s", x)
+}
+
+# A function to take data frame, row, and cloumn as arguments, subsets data according
+# to the given selections.
+# Selection examples: By index, name, logical vector etc
+wk_2_subset_function <- function(data, rows, cols){
+    data <- data[rows,cols]
+    result = list()
+    for (col_name in names(data)) {
+        col_value <- data[[col_name]]
+        if(class(col_value) == 'numeric' | class(col_value) == 'integer') {
+            statistics <- list(sum=df_sum(col_value), mean=df_mean(col_value), sd=df_sd(col_value))
+            result[[col_name]] <- statistics
+        } else {
+            result[[col_name]] <- table(col_value)
+                }
+      }
+  result
+  }
+
+data <- mtcars
+
+wk_2_subset_function(data, rows = 1:nrow(data), cols = 1:ncol(data))
+```
+
+```{r}
+
+#### WEEK 3
+
+chop_chop <- function(data_frame) {
+      numeric_index <- sapply(data_frame, is.numeric)
+      numeric_data_frame <- data_frame[,which(numeric_index), drop=F]
+      non_numeric_data_frame <- data_frame[,which(!numeric_index), drop = F]
+      list(numeric_data_frame=numeric_data_frame, non_numeric_data_frame=non_numeric_data_frame)
+}
+
+# Modification of the week 2 function using sapply
+wk_3_subset_function <- function(data_frame, row_s, col_s) {
+    data_frame <- data_frame[row_s, col_s]
+    s_data_frame <- chop_chop(data_frame)
+    means <- colMeans(s_data_frame$numeric_data_frame)
+    sums <- colSums(s_data_frame$numeric_data_frame)
+    f_table <- lapply(s_data_frame$non_numeric_data_frame, table)
+    list( sum=sums, frequencies=f_table)
+}
+
+# Testing the functions
+data <- mtcars
+chop_chop(mtcars)
+
+wk_3_subset_function(mtcars, row_s = 1: nrow(mtcars), col_s = 1: ncol(mtcars))
+```
+
+```{r}
+
+#### WEEK 4
+
+######################
+# Data Preprocessing #
+######################
+# Let's make a dataframe
+Country <- c('France','Spain','Germany','Spain','Germany','France','Spain','France','Germany','France')
+Age <- c('44','27','30','38','40','35','','48','50','37')
+Salary <- c('72000','48000','54000','61000','','58000','52000','79000','83000','67000')
+
+dataset <- data.frame(Country, Age, Salary)
+dataset
+
+# We can see that dataset is with missing values.
+
+# Taking care of missing data
+# Although there are many options to take care of missing values, we are going to use 'replace by Mean approch'
+dataset$Age = ifelse(is.na(dataset$Age),
+              ave(dataset$Age, FUN = function(x) mean(x, na.rm = TRUE)),
+              dataset$Age)
+dataset$Salary = ifelse(is.na(dataset$Salary),
+                ave(dataset$Salary, FUN = function(x) mean(x, na.rm = TRUE)),
+                dataset$Salary)
+dataset
+
+# Here dataset ain't got no missing values.
+```
+
+```{r}
+#### WEEK 5
+
+## Please ignore this, just checking if R has required packages
+list.of.packages <- c("magritter", "dplyr")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+library(magrittr)
+library(dplyr)
+
+chop_it_using_pipes <- function(new_data, rows, cols){
+    stat_new_data <- function(inp_vector){
+        if (is.numeric(inp_vector)){
+    return(mean(inp_vector))
+      } else{
+    return(table(inp_vector))
+  }
+}
+
+    data <- new_data[rows, cols]
+
+    new_data %<>% lapply(stat_new_data) %<>% list()
+
+    list(data, new_data)
+
+    }
+# Testing the functions
+
+data <- mtcars
+
+df_1 <- chop_it_using_pipes(mtcars)
+
+df_1
+
+# chop it from 9 to 5
+df_2 <- chop_it_using_pipes(mtcars, rows = 9: nrow(mtcars), cols = 1: 5)
+df_2
+
+# chop it 24 7
+df_3 <- chop_it_using_pipes(mtcars, rows = 24: nrow(mtcars), cols = 7: ncol(mtcars))
+df_3
+
+```

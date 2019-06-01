@@ -1,0 +1,160 @@
+---
+title: "homework_6"
+author: "Mrinal Vashisth"
+date: "4/5/2019"
+output: html_document
+---
+
+```{r}
+
+#################################################################
+## A.) Working with iris dataset
+#################################################################
+
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+
+# let's have a glimpse at how this dataset looks like
+dplyr::glimpse(iris)
+
+# converting iris dataset to long format
+iris_long <- datasets::iris %>%
+  dplyr::mutate(.data = ., id = dplyr::row_number(x = Species)) %>%
+  tidyr::gather(
+    data = .,
+    key = "condition",
+    value = "value",
+    Sepal.Length:Petal.Width,
+    convert = TRUE,
+    factor_key = TRUE
+  ) %>%
+  tidyr::separate(
+    col = "condition",
+    into = c("attribute", "measure"),
+    remove = FALSE,
+    sep = "\\.",
+    convert = TRUE
+  ) %>% # converting column types
+  dplyr::mutate_if(
+    .tbl = .,
+    .predicate = purrr::is_bare_character,
+    .funs = ~ base::as.factor(.)
+  ) %>%
+  dplyr::mutate_if(
+    .tbl = .,
+    .predicate = base::is.factor,
+    .funs = ~ base::droplevels(.)
+  ) %>%
+  dplyr::select(.data = ., id, dplyr::everything()) %>%
+  tibble::as_tibble(x = .)
+
+# let's again have a glimpse at how this dataset looks like
+dplyr::glimpse(x = iris_long)
+
+############################
+# plotting r iris_long
+###########################
+
+p <- ggplot(data = iris_long, aes(x = iris_long$id, y = iris_long$value)) +
+  geom_point(aes(color = iris_long$Species, shape = iris_long$attribute)) + 
+  scale_color_brewer(type = "qual", palette = "Set2") 
+
+p + geom_smooth(fill="purple",color="darkorange",size=2,method="lm")
+
+#################################################################
+## B.) Working with gapminder dataset
+#################################################################
+
+# install.packages('gapminder')
+library(gapminder)
+
+mind_the_gap_2007 <- subset(gapminder, gapminder$year > 2002)
+
+#####
+# Plot of the year 2007
+#####
+
+p_2007 <- ggplot(mind_the_gap_2007, aes(x = gdpPercap, y = lifeExp)) +
+  geom_point(aes(color = continent, size = pop), alpha = 0.8) +
+  scale_x_continuous(trans = 'log') +
+  facet_wrap(~year) +
+  scale_color_brewer(type = "Qual", palette = "Accent") +
+  theme(text = element_text(size = 9))
+
+p_2007
+
+#####
+# Plot of all these years, lifeExp
+#####
+
+p_all_them_year <- ggplot(gapminder, aes(x = year, y = lifeExp)) +
+  geom_point(aes(color = continent, size = pop), alpha = 0.8) +
+  scale_x_continuous(trans = 'log') +
+  scale_color_brewer(type = "Qual", palette = "Accent") +
+  theme(text = element_text(size = 9))
+
+p_all_them_year + geom_smooth(fill="white",color="darkorange",size=2,method="lm")
+
+#####
+# Plot of all these years, Population
+#####
+
+gapminder %>%
+  mutate(gdp=gdpPercap*pop) %>%
+  group_by(continent,year) %>%
+  summarize(MeanLifeExp=mean(lifeExp), MeanGDP=mean(gdp)) %>%
+  ggplot(aes(year,MeanGDP,color=continent)) + 
+  geom_line() +
+  geom_smooth(fill="white",color="darkorange",size=2,method="lm")
+
+#####
+# Bar plots of our choice
+#####
+
+# a boxplot of lifeExp
+ggplot(gapminder, aes(x = continent, y = lifeExp)) +
+  geom_boxplot(fill="orange", outlier.colour = "red") +
+  geom_jitter(position = position_jitter(width = 0.001, height = 0), alpha = 1/12)
+
+# plot for number of countries in each continent
+ggplot(gapminder, aes(x=continent, fill=continent)) + 
+ geom_bar() 
+
+
+```
+
+```{r}
+library(gganimate)
+
+# It's surprising to see how the GDP of Europe exploded in the later half of the
+# last century. It is consistent with the fact that they robbed half the Earth
+# of their wealth.
+
+gdp_anim_plot <- ggplot(gapminder, aes(x = continent, y =gdpPercap, fill = continent)) +
+  geom_bar(stat = 'identity', alpha = 0.7, show.legend = FALSE) +
+  scale_colour_manual(values = country_colors) +
+  # gganimate
+  labs(title = 'Year: {frame_time}', x = 'Continent', y = 'GDP over the years') +
+  transition_time(year) +
+  ease_aes('sine-in-out')
+
+gdp_anim_plot
+```
+```{r}
+# Here you can see that over the years, the population of Asia exploded
+
+pop_anim_plot <- ggplot(gapminder, aes(x = continent, y =pop, fill = continent)) +
+  geom_bar(stat = 'identity', alpha = 0.7, show.legend = FALSE) +
+  scale_colour_manual(values = country_colors) +
+  # gganimate
+  labs(title = 'Year: {frame_time}', x = 'Continent', y = 'Population over the years') +
+  transition_time(year) +
+  ease_aes('sine-in-out')
+
+pop_anim_plot
+```
+
+
