@@ -1,0 +1,367 @@
+---
+title: "wk_10_and_11_hw"
+author: "Mrinal Vashisth"
+date: "5/29/2019"
+output: html_document
+---
+
+```{r,  echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(Hmisc)
+#install.packages('DataExplorer')
+library(DataExplorer)
+library(data.table)
+#install.packages("GGally")
+library(GGally)
+library(MASS)       # ginv -- coefficient estimation
+library(splines)    # ns, bs -- spline curves
+library(multcomp)   # glht -- linear hypotheses
+#BiocManager::install('edgeR')
+library(tidyverse)  # working with data frames, plotting
+#install.packages('MuMIn')
+library(caTools)
+library(ggfortify)
+# install.packages('rms')
+library(lattice)
+
+```
+
+```{r}
+
+
+# Anscombe’s data set
+# Scatter plot facetted by set
+
+anscombe_data <- readRDS('/home/manu/Downloads/anscombe.rds')
+
+p <- ggplot(data = anscombe_data, aes(x, y, color = as.factor(set))) + 
+  geom_point() + 
+  scale_color_brewer(type = "qual", palette = "Set2") 
+
+p + facet_wrap(.~set)
+
+```
+
+```{r}
+# Pearson’s correlation by set, and non-parametric, and p-value
+
+dt <- data.table(anscombe_data)
+dtCor <- dt[, .(mCor = cor(x,y)), by=set]
+
+# Add geom_smooth() to the plot
+
+l <- p + geom_smooth(color="grey",size=0.5,method="lm")
+
+l + facet_wrap(.~set)
+
+# Summary calculation (mean, sd) grouped by set
+dt_summary <- dt[, .(mean(x), mean(y), sd(x), sd(y)), by=set]
+colnames(dt_summary) <- c('Set', 'mean x', 'mean y', 'sd x', 'sd y')
+dt_summary
+
+## another silly method
+# calc_mean <- aggregate(. ~set, anscombe_data, mean)
+# calc_sd <- aggregate(. ~set, anscombe_data, sd)
+# calc_sd['set'] <- NULL
+# 
+# res <- data.frame(calc_mean, calc_sd)
+# colnames(res) <- c('Set', 'mean_of_x', 'mean_of_y', 'sd_of_x', 'sd_of_y')
+
+
+```
+
+```{r}
+
+# working with airquality dataset
+
+airquality <- read.csv("~/Desktop/AirQualityUCI/AirQualityUCI.csv", header=TRUE, sep=";", na.strings=c("-200", "-200,0"))
+# -200 is missing values in the data, the data is not clean after all
+airquality$X <- NULL
+airquality$X.1 <- NULL
+str(airquality)
+
+##################################################################
+
+# Converting the data to same scale
+
+##################################################################
+
+# All measurements are mg/m^3 per hour
+
+# Absolute humidity (units are grams of water vapor per cubic meter volume of air) is a measure of the actual amount of water vapor in the air, regardless of the air's temperature. 
+
+# Relative humidity, expressed as a percent, is a measure of the amount of water vapor that air is holding compared the the amount it can hold at a specific temperature. 
+
+###################################################################
+
+# this dataset is in Roman notation, decimals are commas and commas are decimals
+  sub_clean_commas <- function(x) {gsub(",",".", x)}
+
+###################################################################
+# T, RH, AH, C6H6.GT., CO.GT. these are factors due to commas
+
+airquality$T <- sub_clean_commas(airquality$T)
+airquality$RH <- sub_clean_commas(airquality$RH)
+airquality$AH <- sub_clean_commas(airquality$AH)
+airquality$C6H6.GT. <- sub_clean_commas(airquality$C6H6.GT.)
+airquality$CO.GT. <- sub_clean_commas(airquality$CO.GT.)
+
+str(airquality)
+
+
+```
+
+```{r}
+#################################################################
+
+# converting all to numeric and removing useless information
+
+################################################################
+
+new_airq <- airquality
+new_airq$Date <- NULL
+new_airq$Time <- NULL
+# two line dancing to convert all factors into integers
+new_airq <- data.matrix(new_airq)
+new_airq <- data.frame(new_airq)
+str(new_airq)
+
+summary(new_airq)
+
+# we see that NMHC.GT. has 8557 missing values, this column is bad, we should remove it
+
+new_airq$NMHC.GT. <- NULL
+
+
+```
+
+```{r}
+#############################################################
+
+# Variable exploration
+
+#############################################################
+
+# Let's omit the NA's now
+
+final_air <- na.omit(new_airq)
+
+# let's plot a violin to check the scale of the variables
+
+ggplot(stack(data.frame(final_air)), aes(x = ind, y = values)) +
+    geom_violin() + theme_classic()
+
+# We can see that the dataset is not normalised, let's do some scaling
+
+final_air <- scale(final_air, center = TRUE, scale = TRUE)
+
+# once more Violin
+
+ggplot(stack(data.frame(final_air)), aes(x = ind, y = values)) +
+    geom_violin() + theme_classic()
+
+# Let's plot density
+
+plot_density(final_air)
+
+# let's plot a PCA
+wox <- prcomp(final_air)
+autoplot(wox, label = FALSE, frame = TRUE, frame.type = 'norm')
+
+### PCA, is not very informative
+
+```
+
+```{r}
+
+# All correlations matrix using ggcorr
+
+ggcorr(final_air, palette = "RdBu", label = TRUE)
+
+```
+
+
+```{r}
+# leniar model
+
+final_air <- data.frame(final_air)
+
+fit <- lm(C6H6.GT. ~ .-C6H6.GT., data=final_air)
+
+summary(fit)
+
+# but we kind of knew this answer, as we saw in the correlation matrix
+
+```
+
+```{r}
+
+# function for plotting regression curve
+
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") +
+  labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+# after looking at the plot it has become clearer that this model is all good and shiny
+# in fact,
+# it is TOO GOOD TO BE TRUE!!
+# maybe there is OVERFITTING
+```
+
+
+
+
+```{r}
+
+#####################################################
+# Redoing the leniar model, the proper way, by splitting into test and train
+#####################################################
+
+new_dataset <- final_air
+
+split = sample.split(new_dataset, SplitRatio = 1/5) # Twenty percent split
+training_set = subset(new_dataset, split == TRUE)
+test_set = subset(new_dataset, split == FALSE)
+
+# Fitting and predicting
+
+new_fit<- lm(C6H6.GT. ~ .-C6H6.GT., data=training_set)
+
+summary(new_fit)
+
+# Plotting
+
+ggplot(new_fit$model, aes_string(x = names(new_fit$model)[2], y = names(new_fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") +
+  labs(title = paste("Adj R2 = ",signif(summary(new_fit)$adj.r.squared, 5),
+                     "Intercept =",signif(new_fit$coef[[1]],5 ),
+                     " Slope =",signif(new_fit$coef[[2]], 5),
+                     " P =",signif(summary(new_fit)$coef[2,4], 5)))
+
+plot(new_fit)
+
+########################
+# Let's do some predictions
+
+y_pred <- predict(new_fit, data = test_set)
+
+#_____
+y_pred <- data.frame(y_pred)
+colnames(y_pred) <- "Predicted"
+
+y_original <- test_set$C6H6.GT.
+y_original <- data.frame(y_original)
+colnames(y_original) <- "Original"
+
+y_all <- cbind(y_pred$Predicted, y_original$Original)
+colnames(y_all) <- c('Predicted', 'Original')
+
+# plot
+
+plot_density(y_all)
+
+# We can see that the curves are similar
+
+
+```
+
+```{r}
+
+###################################################
+#                                   TASK 11
+###################################################
+
+# let's modify our regressor and do some polynomial fitting
+# Splitting the dataset into the Training set and Test set
+
+# Splitting the dataset into the Training set and Test set
+
+new_dataset <- final_air
+
+split = sample.split(new_dataset, SplitRatio = 1/5)
+training_set = subset(new_dataset, split == TRUE)
+test_set = subset(new_dataset, split == FALSE)
+
+# Fitting and predicting
+
+poly_reg <- lm(C6H6.GT. ~ poly(-C6H6.GT.- T- RH-AH, 3) + poly(T + RH + AH, 2),
+              data = training_set)
+summary(poly_reg)
+
+# We can see that R^2 is 1, I don't think this is a meaningful model.
+
+y_pred <- predict(poly_reg, data = test_set)
+
+#_____
+y_pred <- data.frame(y_pred)
+colnames(y_pred) <- "Predicted"
+
+y_original <- test_set$C6H6.GT.
+y_original <- data.frame(y_original)
+colnames(y_original) <- "Original"
+
+y_all <- cbind(y_pred$Predicted, y_original$Original)
+colnames(y_all) <- c('Predicted by poly_lm', 'Original')
+
+# plot
+
+plot(poly_reg)
+
+plot_density(y_all)
+
+# We can see that the curves are similar and better as compared to simple lm
+
+```
+
+
+
+<!-- ```{r} -->
+<!-- # of course we can run an all possible simple leniar regression models for pairs of columns from a dataframe but let's work with dredge -->
+
+<!-- ###### -->
+<!-- # backward elemination with full model selection -->
+<!-- #### -->
+
+<!-- # Backwards elimination -->
+
+<!-- options(na.action = "na.fail") -->
+<!-- global_model_raw <- lm(C6H6.GT. ~ ., data= final_air) -->
+
+<!-- global_model <- step(global_model_raw, direction = "backward") -->
+
+<!-- # dredge full model selection -->
+
+<!-- combinations <- dredge(global_model) -->
+<!-- all_coeff <- coefTable(combinations) -->
+
+<!-- # as we can see that this is a large list, let's get all coefficients and shortlist them -->
+
+<!-- cool_models <- subset(combinations, delta < 4) -->
+<!-- cool_coeff <- coefTable(cool_models) -->
+
+<!-- # Visualize the model selection table: -->
+
+<!-- plot(cool_models, labAsExpr = TRUE) -->
+
+<!-- #'Best' model -->
+<!-- summary(get.models(cool_models, 1)[[1]]) -->
+
+<!-- best_lm_fit <- get.models(cool_models, 1)[[1]] -->
+<!-- # Adjusted R-squared:  0.093 -->
+<!-- # We can see that the best model is SUPER BAD -->
+<!-- # Maybe there isn't a leniar relationship -->
+
+<!-- ggplotRegression(best_lm_fit) -->
+
+
+<!-- ``` -->
+
+
+
