@@ -321,47 +321,104 @@ plot_density(y_all)
 ```
 
 
+```{r}
 
-<!-- ```{r} -->
-<!-- # of course we can run an all possible simple leniar regression models for pairs of columns from a dataframe but let's work with dredge -->
+###################################################
+#                                   MODIFICATIONS TASK 10 and 11
+###################################################
 
-<!-- ###### -->
-<!-- # backward elemination with full model selection -->
-<!-- #### -->
+# All models
+mod1 <- lm(C6H6.GT. ~ NO2.GT., data=new_dataset)
+mod2 <-lm(C6H6.GT. ~ PT08.S1.CO., data=new_dataset)
+mod3 <-lm(C6H6.GT. ~ PT08.S4.NO2., data=new_dataset)
+mod4 <-lm(C6H6.GT. ~ PT08.S5.O3., data=new_dataset)
+mod5 <-lm(C6H6.GT. ~ PT08.S3.NOx., data=new_dataset)
+mod6 <-lm(C6H6.GT. ~ PT08.S2.NMHC., data=new_dataset)
+mod7 <-lm(C6H6.GT. ~ NOx.GT., data=new_dataset)
+mod8 <-lm(C6H6.GT. ~ CO.GT., data=new_dataset)
 
-<!-- # Backwards elimination -->
+# All coefficients 
+summary(mod1)$coefficients[4]
+summary(mod2)$coefficients[4]
+summary(mod3)$coefficients[4]
+summary(mod4)$coefficients[4]
+summary(mod5)$coefficients[4]
+summary(mod6)$coefficients[4]
+summary(mod7)$coefficients[4]
+summary(mod8)$coefficients[4]
 
-<!-- options(na.action = "na.fail") -->
-<!-- global_model_raw <- lm(C6H6.GT. ~ ., data= final_air) -->
+# fullmodel
 
-<!-- global_model <- step(global_model_raw, direction = "backward") -->
+complete_model <- lm(C6H6.GT. ~ ., data=new_dataset)
+summary(complete_model)$coefficients[4]
 
-<!-- # dredge full model selection -->
+```
 
-<!-- combinations <- dredge(global_model) -->
-<!-- all_coeff <- coefTable(combinations) -->
+```{r}
 
-<!-- # as we can see that this is a large list, let's get all coefficients and shortlist them -->
+library(car)
 
-<!-- cool_models <- subset(combinations, delta < 4) -->
-<!-- cool_coeff <- coefTable(cool_models) -->
+# correlations for all variables
+plot_correlation(final_air)
 
-<!-- # Visualize the model selection table: -->
+# let's get variance inflation factors for each variable form the full model, our cutoff is vif < 5, which means that the variables are also correlating with each other
 
-<!-- plot(cool_models, labAsExpr = TRUE) -->
+vif(complete_model)
 
-<!-- #'Best' model -->
-<!-- summary(get.models(cool_models, 1)[[1]]) -->
+# we can see that only the following have vif < 5
+# PT08.S3.NOx.
+# NO2.GT.
 
-<!-- best_lm_fit <- get.models(cool_models, 1)[[1]] -->
-<!-- # Adjusted R-squared:  0.093 -->
-<!-- # We can see that the best model is SUPER BAD -->
-<!-- # Maybe there isn't a leniar relationship -->
+```
 
-<!-- ggplotRegression(best_lm_fit) -->
+```{r}
+
+## Final model
+# we can see that only the following have vif < 5
+# PT08.S3.NOx.
+# NO2.GT.
+
+# Fitting and predicting
+
+final_model <- lm(C6H6.GT. ~ PT08.S3.NOx. + NO2.GT.,
+              data = training_set)
 
 
-<!-- ``` -->
+# We can see that R^2 is 1, I don't think this is a meaningful model.
 
+y_pred <- predict(final_model, data = test_set)
+
+#_____
+y_pred <- data.frame(y_pred)
+colnames(y_pred) <- "Predicted"
+
+y_original <- test_set$C6H6.GT.
+y_original <- data.frame(y_original)
+colnames(y_original) <- "Original"
+
+y_all <- cbind(y_pred$Predicted, y_original$Original)
+colnames(y_all) <- c('Predicted by final_model', 'Original')
+
+# plot
+
+summary(final_model)
+
+plot(final_model)
+
+plot_density(y_all)
+
+vif(final_model)
+
+# it's not a perfect model but it's more realistic as compared to all the previous models
+
+ggplot(final_model$model, aes_string(x = names(final_model$model)[2], y = names(final_model$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") +
+  labs(title = paste("Adj R2 = ",signif(summary(final_model)$adj.r.squared, 5),
+                     "Intercept =",signif(final_model$coef[[1]],5 ),
+                     " Slope =",signif(final_model$coef[[2]], 5),
+                     " P =",signif(summary(final_model)$coef[2,4], 5)))
+
+```
 
 
