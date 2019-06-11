@@ -132,7 +132,7 @@ chop_it_using_pipes <- function(new_data, rows, cols){
 
     data <- new_data[rows, cols]
 
-    new_data %<>% lapply(stat_new_data) %<>% list()
+    new_data %>% lapply(stat_new_data) %>% list()
 
     list(data, new_data)
 
